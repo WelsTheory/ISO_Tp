@@ -1,0 +1,38 @@
+/*
+ * RCC.c
+ *
+ *  Created on: Jun 30, 2022
+ *      Author: Wels
+ */
+#include "RCC.h"
+
+void Sys_ClockConfig(void)
+{
+	RCC->PLLCFGR &= ~(RCC_PLLCFGR_PLLM | RCC_PLLCFGR_PLLN | RCC_PLLCFGR_PLLP | RCC_PLLCFGR_PLLQ | RCC_PLLCFGR_PLLSRC);
+	RCC->PLLCFGR |= (PLL_M << 0 | PLL_N<<6 | PLL_P<<16 | PLL_Q<<24);
+
+	RCC->CR |= RCC_CR_HSEON;
+	while((RCC->CR & RCC_CR_HSERDY) == 0);
+
+	RCC->PLLCFGR |= RCC_PLLCFGR_PLLSRC_HSE;
+	RCC->CR |= RCC_CR_PLLON;
+	while((RCC->CR & RCC_CR_PLLRDY) == 0);
+
+	FLASH->ACR &= ~(FLASH_ACR_LATENCY);
+	FLASH->ACR |= FLASH_ACR_LATENCY_5WS;
+	FLASH->ACR |= FLASH_ACR_PRFTEN;
+
+	RCC->CFGR &= ~(RCC_CFGR_SW);
+	RCC->CFGR |= RCC_CFGR_SW_1;
+	while((RCC->CFGR & RCC_CFGR_SWS_1) == 0);
+
+	RCC->CFGR &= ~(RCC_CFGR_HPRE);
+
+	RCC->CFGR &= ~(RCC_CFGR_PPRE1);
+	RCC->CFGR |= (RCC_CFGR_PPRE1_DIV4);
+
+	RCC->CFGR &= ~(RCC_CFGR_PPRE2);
+	RCC->CFGR |= (RCC_CFGR_PPRE2_DIV2);
+
+
+}
