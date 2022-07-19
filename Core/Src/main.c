@@ -12,29 +12,23 @@
 
 #include "MSE_OS_Core.h"
 
-uint32_t stack1[STACK_SIZE];
-uint32_t stack2[STACK_SIZE];
-uint32_t stack3[STACK_SIZE];
+task_handler_t task1, task2, task3;
 
-uint32_t sp_tarea1;
-uint32_t sp_tarea2;
-uint32_t sp_tarea3;
-
-void tarea_Wels(void)  {
+void tarea1(void)  {
 	int i;
 	while (1) {
 		i++;
 	}
 }
 
-void tarea_Theory(void)  {
+void tarea2(void)  {
 	int j;
 	while (1) {
 		j++;
 	}
 }
 
-void tarea_tercera(void)  {
+void tarea3(void)  {
 	int k;
 	while (1) {
 		k++;
@@ -48,12 +42,14 @@ int main(void)
 	USART_Init(Baudios_115);
 	printf("hola...\r\n");
 	SysTick_ClockConfig(SysTick_ClockMax);
-	os_InitTarea(tarea_Wels, &stack1, &sp_tarea1);
-	os_InitTarea(tarea_Theory, &stack2, &sp_tarea2);
-	os_InitTarea(tarea_tercera, &stack3, &sp_tarea3);
+	OS_Init();
+	OS_InitTask(&task1, tarea1);
+	OS_InitTask(&task2, tarea2);
+	OS_InitTask(&task3, tarea3);
+
 	while(1)
 	{
-
+		__WFI();
 	}
 	return 0;
 }
