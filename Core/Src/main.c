@@ -12,6 +12,9 @@
 
 #include "MSE_OS_Core.h"
 
+static uint32_t global_tickCounter = 0;
+static uint32_t globla_idleTaskCounter = 0;
+
 task_handler_t task1, task2, task3;
 
 void tarea1(void)  {
@@ -35,6 +38,21 @@ void tarea3(void)  {
 	}
 }
 
+
+void tickHook(void)
+{
+	global_tickCounter++;
+}
+
+
+void taskIdleHook()
+{
+	while(1)
+	{
+		globla_idleTaskCounter++;
+	}
+}
+
 int main(void)
 {
 	Sys_ClockConfig();
@@ -42,10 +60,11 @@ int main(void)
 	USART_Init(Baudios_115);
 	printf("hola...\r\n");
 	SysTick_ClockConfig(SysTick_ClockMax);
-	OS_Init();
+
 	OS_InitTask(&task1, tarea1);
 	OS_InitTask(&task2, tarea2);
 	OS_InitTask(&task3, tarea3);
+	OS_Init();
 
 	while(1)
 	{
