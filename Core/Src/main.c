@@ -9,66 +9,79 @@
 #include "SysTick.h"
 #include "GPIO.h"
 #include "USART.h"
-
 #include "MSE_OS_Core.h"
+#include "MSE_OS_API.h"
 
-static uint32_t global_tickCounter = 0;
-static uint32_t globla_idleTaskCounter = 0;
+#define PRIORIDAD_0		0
+#define PRIORIDAD_3		3
 
-task_handler_t task1, task2, task3;
+/*==================[Global data declaration]==============================*/
 
+tarea Tarea1;	//prioridad 0
+tarea Botones;	//prioridad 3
+
+osSemaforo Sem_LED1;
+
+/*==================[internal functions declaration]=========================*/
+
+/*==================[internal data definition]===============================*/
+
+/*==================[external data definition]===============================*/
+
+/*==================[internal functions definition]==========================*/
+
+static void initHardware(void)  {
+	Sys_ClockConfig();
+	GPIO_Leds_Init();
+	GPIO_Button_Init();
+	//USART_Init(Baudios_115);
+	//printf("hola...\r\n");
+	SysTick_ClockConfig(SysTick_ClockMax);
+}
+
+/*==================[Definicion de tareas para el OS]==========================*/
 void tarea1(void)  {
-	int i;
+	uint32_t i;
+
 	while (1) {
 		i++;
+
+		if (i%9 == 0)
+		{
+			os_SemaforoTake(&Sem_LED1);
+		}
+		write_LED1(true);
+		os_Delay(100);
+		write_LED1(false);
+		os_Delay(100);
 	}
 }
 
-void tarea2(void)  {
-	int j;
-	while (1) {
-		j++;
+void botones(void)  {
+	while(1)  {
+		if(read_BUTTON() == HIGH)
+		{
+			os_SemaforoGive(&Sem_LED1);
+		}
+
+		os_Delay(100);
 	}
 }
 
-void tarea3(void)  {
-	int k;
-	while (1) {
-		k++;
-	}
-}
-
-
-void tickHook(void)
-{
-	global_tickCounter++;
-}
-
-
-void taskIdleHook()
-{
-	while(1)
-	{
-		globla_idleTaskCounter++;
-	}
-}
 
 int main(void)
 {
-	Sys_ClockConfig();
-	GPIO_Leds_Init();
-	USART_Init(Baudios_115);
-	printf("hola...\r\n");
-	SysTick_ClockConfig(SysTick_ClockMax);
+	initHardware();
 
-	OS_InitTask(&task1, tarea1);
-	OS_InitTask(&task2, tarea2);
-	OS_InitTask(&task3, tarea3);
+	OS_InitTask(tarea1, &Tarea1, PRIORIDAD_0);
+	OS_InitTask(botones, &Botones, PRIORIDAD_3);
+
+	os_SemaforoInit(&Sem_LED1);
+
 	OS_Init();
 
 	while(1)
 	{
-		__WFI();
 	}
 	return 0;
 }
