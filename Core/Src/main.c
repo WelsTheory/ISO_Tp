@@ -20,7 +20,16 @@
 tarea Tarea1;	//prioridad 0
 tarea Botones;	//prioridad 3
 
-osSemaforo Sem_LED1;
+osSemaforo colaTarea1;
+
+/*================= DATOS A ENVIAR EN COLA =================================*/
+struct _mydata  {
+	float var_float;
+	int32_t var_int;
+	char name[3];
+};
+
+typedef struct _mydata my_data;
 
 /*==================[internal functions declaration]=========================*/
 
@@ -41,27 +50,30 @@ static void initHardware(void)  {
 
 /*==================[Definicion de tareas para el OS]==========================*/
 void tarea1(void)  {
-	uint32_t i;
+	my_data datos;
 
 	while (1) {
-		i++;
 
-		if (i%9 == 0)
-		{
-			os_SemaforoTake(&Sem_LED1);
-		}
+		os_ColaRead(&colaTarea1,&datos);
 		write_LED1(true);
-		os_Delay(100);
+		os_Delay(1000);
 		write_LED1(false);
-		os_Delay(100);
+		memset(&datos,0x00,sizeof(my_data));
+
 	}
 }
 
 void botones(void)  {
+	my_data datos_enviar;
 	while(1)  {
 		if(read_BUTTON() == HIGH)
 		{
-			os_SemaforoGive(&Sem_LED1);
+			datos_enviar.var_float = 2.5;
+			datos_enviar.var_int = -5;
+			datos_enviar.name[0] = 'I';
+			datos_enviar.name[1] = 'S';
+			datos_enviar.name[2] = 'O';
+			os_ColaWrite(&colaTarea1,&datos_enviar);
 		}
 
 		os_Delay(100);
@@ -76,7 +88,7 @@ int main(void)
 	OS_InitTask(tarea1, &Tarea1, PRIORIDAD_0);
 	OS_InitTask(botones, &Botones, PRIORIDAD_3);
 
-	os_SemaforoInit(&Sem_LED1);
+	os_ColaInit(&colaTarea1,sizeof(my_data));
 
 	OS_Init();
 

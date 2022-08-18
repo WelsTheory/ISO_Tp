@@ -67,6 +67,8 @@
 #define MIN_PRIORITY			3
 
 #define COUNT_PRIORITY			(MIN_PRIORITY-MAX_PRIORITY)+1
+
+#define QUEUE_HEAP_SIZE			64
 /*==================[definicion codigos de error de OS]=================================*/
 
 #define OS_ERROR_TAREAS			-1
