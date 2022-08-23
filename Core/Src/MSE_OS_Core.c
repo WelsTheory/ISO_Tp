@@ -75,7 +75,7 @@ void __attribute__((weak)) idleTask(void)  {
  * Definicion de prototipos static
  *******************************************************************************/
 static void setPendSV();
-static void os_schedule();
+static void os_scheduler();
 
 /*************************************************************************************************
  *  @brief Inicializa las tareas que correran en el OS.

@@ -26,15 +26,7 @@ void INT_Init(void)
 	NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
-void EXTI15_10_IRQHandler(void)
-{
-	if(EXTI->PR & EXTI_PR_PR13)
-	{
-		flag = 1;
-		NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-		EXTI->PR |= (EXTI_PR_PR13);
-	}
-}
+
 
 
 

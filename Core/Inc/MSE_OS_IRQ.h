@@ -12,8 +12,10 @@
 #include "MSE_OS_API.h"
 #include "main.h"
 
-#define OS_IRQ_NUM	53
+typedef void (*IRQ_UserHandler_t)();
 
+void Os_SetIRQ(IRQn_Type valor_IRQ, IRQ_UserHandler_t IRQ_UserHandler);
 
+void OS_ClearIRQ(IRQn_Type valor_IRQ);
 
 #endif /* INC_MSE_OS_IRQ_H_ */

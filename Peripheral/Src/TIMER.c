@@ -65,10 +65,10 @@ void Timer_Periodi_Init(uint32_t delay, uint32_t arr_load)
 	TIM2->CR1 |= TIM_CR1_CEN;
 }
 
-void TIM2_IRQHandler(void)
-{
-	NVIC_ClearPendingIRQ(TIM2_IRQn);
-	TIM2->SR &= ~(TIM_SR_UIF);
-	toggle_LED3();
-}
+//void TIM2_IRQHandler(void)
+//{
+//	NVIC_ClearPendingIRQ(TIM2_IRQn);
+//	TIM2->SR &= ~(TIM_SR_UIF);
+//	toggle_LED3();
+//}
 
