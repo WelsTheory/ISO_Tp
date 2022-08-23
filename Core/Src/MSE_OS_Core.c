@@ -6,20 +6,41 @@
  */
 #include "MSE_OS_Core.h"
 
-/********************************************************************************
- * Definicion de variables globales
- *******************************************************************************/
+#define TASK_MAX_ALLOWED		8
 
-static os_control control_OS;
-static tarea tareaIdle;
+/*==================[definicion de estructura para el SO]=================================*/
 
-/********************************************************************************
- * Definicion de prototipos static
- *******************************************************************************/
-static void initIdleTask(void);
-static void setPendSV(void);
-static void ordenarPrioridades(void);
-static int32_t partition(tarea** arr, int32_t l, int32_t h);
+typedef struct
+{
+	task_handler_t *tarea[TASK_MAX_ALLOWED];
+	uint8_t ActualTareaId;
+	uint8_t NumTarea;
+
+} os_schedule_elem_t;
+
+typedef struct
+{
+	os_schedule_elem_t TareaPorPrioridad[OS_MAX_PRIORITY+1];
+
+} os_schedule_t;
+
+typedef struct
+{
+	os_schedule_t schedule;
+	task_handler_t *listaTareas[TASK_MAX_ALLOWED];
+	uint8_t TareaActual;
+	uint8_t TareaAgregad;
+	task_handler_t * actualTarea;
+	task_handler_t * nextTarea;
+	os_error_t error;
+	os_state_t state;
+	bool cambioContextoNecesario;
+	int16_t TareaEnZonaCritica;
+	bool SchedulingFromIRQ;
+}os_control_t;
+
+static os_control_t Os_Control;
+static task_handler_t tareaIdle;
 
 /******************************************************************************************
  * @brief Implementación de Tarea Idle y Hooks
@@ -49,6 +70,13 @@ void __attribute__((weak)) idleTask(void)  {
 	}
 }
 
+
+/********************************************************************************
+ * Definicion de prototipos static
+ *******************************************************************************/
+static void setPendSV();
+static void os_schedule();
+
 /*************************************************************************************************
  *  @brief Inicializa las tareas que correran en el OS.
  *
@@ -62,60 +90,44 @@ void __attribute__((weak)) idleTask(void)  {
  *  @param *stack_pointer   Puntero a la variable que almacena el stack pointer de la tarea.
  *  @return     None.
  ***************************************************************************************************/
-void OS_InitTask(void *entryPoint, tarea *task, uint8_t prioridad )
+void OS_InitTask(task_handler_t *tareaHandler, void* entryPoint, uint8_t prioridad  )
 {
-	static uint8_t id = 0; //el id sera correlativo a medida que se generen mas tareas
-
-	/*
-	 * Al principio se efectua un pequeño checkeo para determinar si llegamos a la cantidad maxima de
-	 * tareas que pueden definirse para este OS. En el caso de que se traten de inicializar mas tareas
-	 * que el numero maximo soportado, se guarda un codigo de error en la estructura de control del OS
-	 * y la tarea no se inicializa. La tarea idle debe ser exceptuada del conteo de cantidad maxima
-	 * de tareas
-	 */
-	if (control_OS.cantidad_Tareas < TASK_MAX_ALLOWED)
+	if(Os_Control.TareaAgregad >= TASK_MAX_ALLOWED)
 	{
-		task->stack[STACK_SIZE/4 - XPSR] = INIT_XPSR;								//necesari para bit thumb
-		task->stack[STACK_SIZE/4 - PC_REG] = (uint32_t)entryPoint;
-		task->stack[STACK_SIZE/4 - LR] = (uint32_t)returnHook;
+		Os_Control.error = Os_error_exceeded;
+		errorHook(OS_InitTask);
+	}
+	else if(prioridad > OS_MAX_PRIORITY)
+	{
+		Os_Control.error = Os_error_maxpriority_exceeded;
+	}
+	else{
+		tareaHandler->stack[STACK_SIZE/4 - XPSR] = INIT_XPSR;								//necesari para bit thumb
+		tareaHandler->stack[STACK_SIZE/4 - PC_REG] = (uint32_t)entryPoint;
+		tareaHandler->stack[STACK_SIZE/4 - LR] = (uint32_t)returnHook;
 		/**
 		 * El valor previo de LR (que es EXEC_RETURN en este caso) es necesario dado que
 		 * en esta implementacion, se llama a una funcion desde dentro del handler de PendSV
 		 * con lo que el valor de LR se modifica por la direccion de retorno para cuando
 		 * se termina de ejecutar getContextoSiguiente
 		 */
-		task->stack[STACK_SIZE/4 - LR_PREV] = EXEC_RETURN;
+		tareaHandler->stack[STACK_SIZE/4 - LR_PREV] = EXEC_RETURN;
 
-		task->stackPointer = (uint32_t) (task->stack + STACK_SIZE/4 - FULL_STACKING_SIZE);
+		tareaHandler->stackPointer = (uint32_t) (tareaHandler->stack + STACK_SIZE/4 - FULL_STACKING_SIZE);
 
-		task->entryPoint = entryPoint;
+		tareaHandler->entryPoint = entryPoint;
 
+		tareaHandler->id = Os_Control.TareaAgregad;
+		tareaHandler->state = Task_Ready;
+		tareaHandler->priority = prioridad;
 
-		task->id = id;
-		task->state = Task_Ready;
-		task->priority = prioridad;
+		Os_Control.schedule.TareaPorPrioridad[prioridad].tarea[
+															   Os_Control.schedule.TareaPorPrioridad[prioridad].NumTarea] = tareaHandler;
 
+		Os_Control.schedule.TareaPorPrioridad[prioridad].NumTarea++;
 
-		/*
-		 * Actualizacion de la estructura de control del OS, guardando el puntero a la estructura de tarea
-		 * que se acaba de inicializar, y se actualiza la cantidad de tareas definidas en el sistema.
-		 * Luego se incrementa el contador de id, dado que se le otorga un id correlativo a cada tarea
-		 * inicializada, segun el orden en que se inicializan.
-		 */
-		control_OS.listaTareas[id] = task;
-		control_OS.cantidad_Tareas++;
-		control_OS.cantTareas_prioridad[prioridad]++;
-		id++;
-	}
-	else
-	{
-		/*
-		 * En el caso que se hayan excedido la cantidad de tareas que se pueden definir, se actualiza
-		 * el ultimo error generado en la estructura de control del OS y se llama a errorHook y se
-		 * envia informacion de quien es quien la invoca.
-		 */
-		control_OS.error = OS_ERROR_TAREAS;
-		errorHook(OS_InitTask);
+		Os_Control.listaTareas[Os_Control.TareaAgregad] = tareaHandler;
+		Os_Control.TareaAgregad++;
 	}
 }
 
@@ -153,7 +165,6 @@ static void initIdleTask(void)
 	tareaIdle.id = Os_IdleTask_ID;
 	tareaIdle.state = Task_Ready;
 
-	tareaIdle.priority = 0xFF;
 }
 
 
@@ -174,24 +185,95 @@ void OS_Init(void)  {
 	 * Este estado es util para cuando se debe ejecutar el primer cambio de contexto. Los
 	 * punteros de tarea_actual y tarea_siguiente solo pueden ser determinados por el scheduler
 	 */
-	control_OS.estado_sistema = Os_From_Reset;
-	control_OS.actualTask = NULL;
-	control_OS.nextTask = NULL;
+	Os_Control.actualTarea = NULL;
+	Os_Control.nextTarea = NULL;
+
+	Os_Control.error = Os_error_none;
+	Os_Control.state = Os_From_Reset;
 
 	/*
 	 * El vector de tareas termina de inicializarse asignando NULL a las posiciones que estan
 	 * luego de la ultima tarea. Esta situacion se da cuando se definen menos de 8 tareas.
 	 * Estrictamente no existe necesidad de esto, solo es por seguridad.
 	 */
-	for (i = 0; i<TASK_MAX_ALLOWED; i++)
+	for (i = Os_Control.TareaAgregad; i<TASK_MAX_ALLOWED; i++)
 	{
-		if(i>=control_OS.cantidad_Tareas)
+		Os_Control.listaTareas[i] = NULL;
+	}
+
+	Os_Control.TareaEnZonaCritica = 0;
+	Os_SetSchedulingFromIRQ(false);
+}
+
+static task_handler_t * Os_SelectNextTask_ByPriority(uint8_t prioridad)
+{
+	uint8_t id;
+	bool seekForTask, allBlocked;
+	uint8_t blockedTasksCounter = 0;
+	task_handler_t * taskSelected = NULL;
+
+	id = Os_Control.schedule.TareaPorPrioridad[prioridad].ActualTareaId;
+	/* Solo buscar una posible tarea a ejecutar, si al menos hay una tarea
+	 * agregada en esta prioridad */
+	if (0 < Os_Control.schedule.TareaPorPrioridad[prioridad].NumTarea)
+	{
+		seekForTask = true;
+		allBlocked = false;
+		while (seekForTask)
 		{
-			control_OS.listaTareas[i] = NULL;
+			id++;
+			if (id >= Os_Control.schedule.TareaPorPrioridad[prioridad].NumTarea)
+			{
+				id = 0;
+			}
+			switch (Os_Control.schedule.TareaPorPrioridad[prioridad].tarea[id]->state)
+			{
+			case Task_Ready:
+				seekForTask = false;
+				break;
+			case Task_Blocked:
+				blockedTasksCounter++;
+				if (blockedTasksCounter >=
+						Os_Control.schedule.TareaPorPrioridad[prioridad].NumTarea)
+				{
+					/*all tasks blocked*/
+					seekForTask = false;
+					allBlocked = true;
+				}
+				break;
+			case Task_Running:
+				/*all tasks are blocked except the one that was running*/
+				seekForTask = false;
+				break;
+			case Task_Suspended:
+				/*Nothing to do now*/
+				break;
+			default:
+				Os_Control.state = Os_Error;
+				Os_Control.error = Os_error_invalid_state;
+				seekForTask = false;
+				errorHook(Os_SelectNextTask_ByPriority);
+			}
+		}
+
+		if (allBlocked)
+		{
+			/*No one task ready for actual priority */
+			taskSelected = NULL;
+		}
+		else if (id != Os_Control.schedule.TareaPorPrioridad[prioridad].ActualTareaId)
+		{
+			Os_Control.schedule.TareaPorPrioridad[prioridad].ActualTareaId = id;
+			taskSelected = Os_Control.schedule.TareaPorPrioridad[prioridad].tarea[id];
+		}
+		else
+		{
+			/*only actual task is ready to continue*/
+			taskSelected = Os_Control.schedule.TareaPorPrioridad[prioridad].tarea[id];
 		}
 	}
 
-	ordenarPrioridades();
+	return (taskSelected);
 }
 
 /*************************************************************************************************
@@ -207,192 +289,85 @@ void OS_Init(void)  {
  *  @see errorHook
  ***************************************************************************************************/
 int32_t os_getError(void)  {
-	return control_OS.error;
+	return Os_Control.error;
 }
 
 static void os_scheduler(void)
 {
-	static uint8_t indicePrioridad[COUNT_PRIORITY];
-	uint8_t indiceArrayTareas = 0;
-	uint8_t prioridadActual = MAX_PRIORITY;
-	uint8_t cantBloqueadas_prioridadActual = 0;
-	bool salir = false;
-	uint8_t cant_bloqueadas = 0;
+	uint8_t priority = 0;
+	task_handler_t * taskSelected = NULL;
 
-	if (Os_From_Reset == control_OS.estado_sistema)
+	Os_Control.cambioContextoNecesario = false;
+
+	if (Os_From_Reset == Os_Control.state)
 	{
-		control_OS.actualTask = (tarea*)&tareaIdle;
-		memset(indicePrioridad,0,sizeof(uint8_t)*COUNT_PRIORITY);
-		control_OS.estado_sistema = Os_Normal_Run;
-		/*
-		 * Se comienza a iterar sobre el vector de tareas, pero teniendo en cuenta las
-		 * prioridades de las tareas.
-		 * En esta implementacion, durante la ejecucion de os_Init() se aplica la
-		 * tecnica de quicksort sobre el vector que contiene la lista de tareas
-		 * y se ordenan los punteros a tareas segun la prioridad que tengan. Los
-		 * punteros a tareas quedan ordenados de mayor a menor prioridad.
-		 * Gracias a eso, dividiendo el vector de punteros en cuantas prioridades haya
-		 * podemos recorrer estas subsecciones manteniendo indices para cada prioridad
-		 *
-		 * La mecanica de RoundRobin para tareas de igual prioridad se mantiene,
-		 * asimismo la determinacion de cuando la tarea idle debe ser ejecutada. Cuando
-		 * se recorren todas las tareas de una prioridad y todas estan bloqueadas, entonces
-		 * se pasa a la prioridad menor siguiente
-		 *
-		 * Recordar que aunque todas las tareas definidas por el usuario esten bloqueadas
-		 * la tarea Idle solamente puede tomar estados READY y RUNNING.
-		 */
-
-
-		/*
-		 * Puede darse el caso en que se haya invocado la funcion os_CpuYield() la cual hace una
-		 * llamada al scheduler. Si durante la ejecucion del scheduler (la cual fue forzada) y
-		 * esta siendo atendida en modo Thread ocurre una excepcion dada por el SysTick, habra una
-		 * instancia del scheduler pendiente en modo trhead y otra corriendo en modo Handler invocada
-		 * por el SysTick. Para evitar un doble scheduling, se controla que el sistema no este haciendo
-		 * uno ya. En caso afirmativo se vuelve prematuramente
-		 */
-		if(control_OS.estado_sistema == Os_Scheduling)
+		if (0 == Os_Control.TareaAgregad)
 		{
-			return;
+			Os_Control.state = Os_Error;
+			Os_Control.error = Os_error_notask;
+			errorHook(os_scheduler);
+
 		}
-		/*
-		 * Cambia el estado del sistema para que no se produzcan schedulings anidados cuando
-		 * existen forzados por alguna API del sistema.
-		 */
-		control_OS.estado_sistema = Os_Scheduling;
-		while(!salir)
+		else
 		{
-			/*
-			 * La variable indiceArrayTareas contiene la posicion real dentro del array listaTareas
-			 * de la tarea siguiente a ser ejecutada. Se inicializa en 0
-			 */
-			indiceArrayTareas = 0;
+			/*seleccionar la primer tarea para que sea ejecutada*/
+			/*se selecciona como primer tarea a ejecutar la tarea idle*/
+			Os_Control.actualTarea = &tareaIdle;
+			Os_Control.cambioContextoNecesario = true;
+		}
+	}
+	else
+	{
+		/* Checkear que el SO no esté en medio de un scheduling en otro hilo */
+		if (Os_Normal_Run == Os_Control.state)
+		{
+			Os_Control.state = Os_Scheduling;
+			while ((OS_MAX_PRIORITY > priority) && (NULL == taskSelected))
+			{
+				taskSelected = Os_SelectNextTask_ByPriority(priority);
+				priority++;
+			}
+			if (NULL == taskSelected)
+			{
+				taskSelected = &tareaIdle;
+			}
+			Os_Control.cambioContextoNecesario = (Os_Control.nextTarea != taskSelected);
 
-			/*
-			 * Puede darse el caso de que se hayan definido tareas de prioridades no contiguas, por
-			 * ejemplo dos tareas de maxima prioridad y una de minima prioridad. Quiere decir que no
-			 * existen tareas con prioridades entre estas dos. Este bloque if determina si existen
-			 * funciones para la prioridad actual. Si no existen, se pasa a la prioridad menor
-			 * siguiente
-			 */
-			if(control_OS.cantTareas_prioridad[prioridadActual] > 0)  {
+			Os_Control.nextTarea = taskSelected;
+			Os_Control.state = Os_Normal_Run;
+		}
+	}
 
-				/*
-				 * esta linea asegura que el indice siempre este dentro de los limites de la subseccion
-				 * que forman los punteros a las tareas de prioridad actual
-				 */
-				indicePrioridad[prioridadActual] %= control_OS.cantTareas_prioridad[prioridadActual];
+	if (Os_Control.cambioContextoNecesario)
+	{
+		setPendSV();
+	}
+}
 
-				/*
-				 * El bucle for hace una conversion de indices de subsecciones al indice real que debe
-				 * usarse sobre el vector de punteros a tareas. Cuando se baja de prioridad debe sumarse
-				 * el total de tareas que existen en la subseccion anterior. Recordar que el vector de
-				 * tareas esta ordenado de mayor a menor
-				 */
-				for (int i=0; i<prioridadActual;i++) {
-					indiceArrayTareas += control_OS.cantTareas_prioridad[i];
-				}
-				indiceArrayTareas += indicePrioridad[prioridadActual];
-
-				switch (((tarea*)control_OS.listaTareas[indiceArrayTareas])->state) {
-
-				case Task_Ready:
-					control_OS.nextTask = (tarea*) control_OS.listaTareas[indiceArrayTareas];
-					control_OS.cambioContextoNecesario = true;
-					indicePrioridad[prioridadActual]++;
-					salir = true;
-					break;
-
-					/*
-					 * Para el caso de las tareas bloqueadas, la variable cantBloqueadas_prioActual se utiliza
-					 * para hacer el seguimiento de si se debe bajar un escalon de prioridad
-					 * El bucle del scheduler se ejecuta completo, pasando por todas las prioridades cada vez
-					 * hasta que encuentra una tarea en READY.
-					 * La determinacion de la necesidad de ejecucion de la tarea idle sigue siendo la misma.
-					 */
-				case Task_Blocked:
-					cant_bloqueadas++;
-					cantBloqueadas_prioridadActual++;
-					indicePrioridad[prioridadActual]++;
-					if (cant_bloqueadas == control_OS.cantidad_Tareas)  {
-						control_OS.nextTask = &tareaIdle;
-						control_OS.cambioContextoNecesario = true;
-						salir = true;
-					}
-					else {
-						if(cantBloqueadas_prioridadActual == control_OS.cantTareas_prioridad[prioridadActual])  {
-							cantBloqueadas_prioridadActual = 0;
-							indicePrioridad[prioridadActual] = 0;
-							prioridadActual++;
-						}
-					}
-					break;
-
-					/*
-					 * El unico caso que la siguiente tarea este en estado RUNNING es que
-					 * todas las demas tareas excepto la tarea corriendo actualmente esten en
-					 * estado BLOCKED, con lo que un cambio de contexto no es necesario, porque
-					 * se sigue ejecutando la misma tarea
-					 */
-				case Task_Running:
-					indicePrioridad[prioridadActual]++;
-					control_OS.cambioContextoNecesario = false;
-					salir = true;
-					break;
-
-					/*
-					 * En el caso que lleguemos al caso default, la tarea tomo un estado
-					 * el cual es invalido, por lo que directamente se llama errorHook
-					 * y se actualiza la variable de ultimo error
-					 */
-				default:
-					control_OS.error = OS_ERROR_SCHEDULING;
-					errorHook(os_scheduler);
+void Os_UpdateTicksInAllTaskBlocked()
+{
+	uint8_t priorityID;
+	uint8_t i;
+	for (priorityID = 0; priorityID< OS_MAX_PRIORITY; priorityID++)
+	{
+		for (i = 0; i< Os_Control.schedule.TareaPorPrioridad[priorityID].NumTarea; i++)
+		{
+			if ((Task_Blocked == Os_Control.schedule.TareaPorPrioridad[priorityID].tarea[i]->state) &&
+					(0 < Os_Control.schedule.TareaPorPrioridad[priorityID].tarea[i]->blockedTicks))
+			{
+				Os_Control.schedule.TareaPorPrioridad[priorityID].tarea[i]->blockedTicks--;
+				if (0 == Os_Control.schedule.TareaPorPrioridad[priorityID].tarea[i]->blockedTicks)
+				{
+					Os_Control.schedule.TareaPorPrioridad[priorityID].tarea[i]->state = Task_Ready;
 				}
 			}
-
-			/*
-			 * Antes de salir del scheduler se devuelve el sistema a su estado normal
-			 */
-			control_OS.estado_sistema = Os_Normal_Run;
-
-			/*
-			 * Se checkea la bandera correspondiente para verificar si es necesario un cambio de
-			 * contexto. En caso afirmativo, se lanza PendSV
-			 */
-
-			if(control_OS.cambioContextoNecesario)
-				setPendSV();
 		}
 	}
 }
 
-void SysTick_Handler(void)  {
-	uint8_t i;
-	tarea* task;		//variable para legibilidad
-
-	/*
-	 * Systick se encarga de actualizar todos los temporizadores por lo que se recorren
-	 * todas las tareas que esten definidas y si tienen un valor de ticks de bloqueo mayor
-	 * a cero, se decrementan en una unidad. Si este contador llega a cero, entonces
-	 * se debe pasar la tarea a READY. Es conveniente hacerlo aqui dado que la condicion
-	 * de que pase a descontar el ultimo tick se da en esta porcion de codigo
-	 */
-	i = 0;
-
-	while (control_OS.listaTareas[i] != NULL)  {
-		task = (tarea*)control_OS.listaTareas[i];
-
-		if(task->blockedTicks > 0 )  {
-			if((--task->blockedTicks == 0) && (task->state == Task_Blocked))  {
-				task->state = Task_Ready;
-			}
-		}
-
-		i++;
-	}
-
+void SysTick_Handler(void)
+{
+	Os_UpdateTicksInAllTaskBlocked();
 	os_scheduler();
 	/* tickHook*/
 	tickHook();
@@ -408,15 +383,8 @@ void SysTick_Handler(void)  {
  *  @param 		None
  *  @return     None
  ***************************************************************************************************/
-static void setPendSV(void)  {
-
-	/*
-	 * Se indica en la estructura del OS que el cambio de contexto se esta por invocar
-	 * Se hace antes de setear PendSV para no interferir con las barreras de datos
-	 * y memoria
-	 */
-	control_OS.cambioContextoNecesario = false;
-
+static void setPendSV(void)
+{
 	/**
 	 * Se setea el bit correspondiente a la excepcion PendSV
 	 */
@@ -436,166 +404,110 @@ static void setPendSV(void)  {
 }
 
 /*************************************************************************************************
-	 *  @brief Funcion para determinar el proximo contexto.
-     *
-     *  @details
-     *   Esta funcion obtiene el siguiente contexto a ser cargado. El cambio de contexto se
-     *   ejecuta en el handler de PendSV, dentro del cual se llama a esta funcion
-     *
-	 *  @param 		sp_actual	Este valor es una copia del contenido de MSP al momento en
-	 *  			que la funcion es invocada.
-	 *  @return     El valor a cargar en MSP para apuntar al contexto de la tarea siguiente.
-***************************************************************************************************/
-uint32_t getContextoSiguiente(uint32_t sp_actual)  {
-	uint32_t sp_siguiente;
+ *  @brief Funcion para determinar el proximo contexto.
+ *
+ *  @details
+ *   Esta funcion obtiene el siguiente contexto a ser cargado. El cambio de contexto se
+ *   ejecuta en el handler de PendSV, dentro del cual se llama a esta funcion
+ *
+ *  @param 		sp_actual	Este valor es una copia del contenido de MSP al momento en
+ *  			que la funcion es invocada.
+ *  @return     El valor a cargar en MSP para apuntar al contexto de la tarea siguiente.
+ ***************************************************************************************************/
+uint32_t getContextoSiguiente(uint32_t p_stack_actual)  {
+	uint32_t p_stack_siguiente = p_stack_actual; /* por defecto continuo con la tarea actual*/
 
-	/*
-	 * Esta funcion efectua el cambio de contexto. Se guarda el MSP (sp_actual) en la variable
-	 * correspondiente de la estructura de la tarea corriendo actualmente. Ahora que el estado
-	 * BLOCKED esta implementado, se debe hacer un assert de si la tarea actual fue expropiada
-	 * mientras estaba corriendo o si la expropiacion fue hecha de manera prematura dado que
-	 * paso a estado BLOCKED. En el segundo caso, solamente se puede pasar de BLOCKED a READY
-	 * a partir de un evento. Se carga en la variable sp_siguiente el stack pointer de la
-	 * tarea siguiente, que fue definida por el scheduler. Se actualiza la misma a estado RUNNING
-	 * y se retorna al handler de PendSV
-	 */
+	if (Os_From_Reset == Os_Control.state)
+	{
+		p_stack_siguiente = Os_Control.actualTarea->stackPointer;
+		Os_Control.actualTarea->state = Task_Running;
+		Os_Control.state = Os_Normal_Run;
+	}
+	else
+	{
 
-	control_OS.actualTask->stackPointer = sp_actual;
+		Os_Control.actualTarea->stackPointer = p_stack_actual;
 
-	if (control_OS.actualTask->state == Task_Running)
-		control_OS.actualTask->state = Task_Ready;
+		if (Task_Running == Os_Control.actualTarea->state)
+		{
+			Os_Control.actualTarea->state = Task_Ready;
+		}
 
-	sp_siguiente = control_OS.nextTask->stackPointer;
+		p_stack_siguiente = Os_Control.nextTarea->stackPointer;
 
-	control_OS.actualTask = control_OS.nextTask;
-	control_OS.actualTask->state = Task_Running;
+		Os_Control.actualTarea = Os_Control.nextTarea;
+		Os_Control.actualTarea->state = Task_Running;
 
+	}
 
-	/*
-	 * Indicamos que luego de retornar de esta funcion, ya no es necesario un cambio de contexto
-	 * porque se acaba de gestionar.
-	 */
-	control_OS.estado_sistema = Os_Normal_Run;
+	return(p_stack_siguiente);
+}
 
-	return sp_siguiente;
+task_handler_t* Os_GetTareaActual()
+{
+	return (Os_Control.actualTarea);
+}
+
+os_state_t Os_GetControlState()
+{
+	return(Os_Control.state);
+}
+
+void Os_SetControlState(task_state_t newState)
+{
+	Os_Control.state = newState;
+}
+
+void Os_Critical_Enter()
+{
+	__disable_irq();
+	Os_Control.TareaEnZonaCritica++;
+}
+
+void Os_Critical_Exit()
+{
+	Os_Control.TareaEnZonaCritica--;
+	if (0 >= Os_Control.TareaEnZonaCritica)
+	{
+		Os_Control.TareaEnZonaCritica = 0;
+		__enable_irq();
+	}
+
 }
 
 
-
 /*************************************************************************************************
-	 *  @brief Fuerza una ejecucion del scheduler.
-     *
-     *  @details
-     *   En los casos que un delay de una tarea comience a ejecutarse instantes luego de que
-     *   ocurriese un scheduling, se despericia mucho tiempo hasta el proximo tick de sistema,
-     *   por lo que se fuerza un scheduling y un cambio de contexto si es necesario.
-     *
-	 *  @param 		None
-	 *  @return     None.
-***************************************************************************************************/
+ *  @brief Fuerza una ejecucion del scheduler.
+ *
+ *  @details
+ *   En los casos que un delay de una tarea comience a ejecutarse instantes luego de que
+ *   ocurriese un scheduling, se despericia mucho tiempo hasta el proximo tick de sistema,
+ *   por lo que se fuerza un scheduling y un cambio de contexto si es necesario.
+ *
+ *  @param 		None
+ *  @return     None.
+ ***************************************************************************************************/
 void os_CpuYield(void)  {
 	os_scheduler();
 }
 
-
-
-/*************************************************************************************************
-	 *  @brief Devuelve una copia del puntero a estructura tarea actual.
-     *
-     *  @details
-     *   En aras de mantener la estructura de control aislada solo en el archivo de core esta
-     *   funcion proporciona una copia de la estructura de la tarea actual
-     *
-	 *  @param 		None
-	 *  @return     puntero a la estructura de la tarea actual.
-***************************************************************************************************/
-tarea* os_getTareaActual(void)  {
-	return control_OS.actualTask;
+void Os_SetSchedulingFromIRQ()
+{
+	Os_Control.SchedulingFromIRQ = true;
 }
 
-
-/*************************************************************************************************
-	 *  @brief Ordena tareas de mayor a menor prioridad.
-     *
-     *  @details
-     *   Ordena los punteros a las estructuras del tipo tarea que estan almacenados en la variable
-     *   de control de OS en el array listadoTareas por prioridad, de mayor a menor. Para esto
-     *   utiliza un algoritmo de quicksort. Esto da la posibilidad de cambiar la prioridad
-     *   de cualquier tarea en tiempo de ejecucion.
-     *
-	 *  @param 		None
-	 *  @return     None.
-***************************************************************************************************/
-static void ordenarPrioridades(void)  {
-	// Create an auxiliary stack
-	int32_t stack[TASK_MAX_ALLOWED];
-
-	// initialize top of stack
-	int32_t top = -1;
-	int32_t l = 0;
-	int32_t h = control_OS.cantidad_Tareas - 1;
-
-	// push initial values of l and h to stack (indices a estructuras de tareas)
-	stack[++top] = l;
-	stack[++top] = h;
-
-	// Keep popping from stack while is not empty
-	while (top >= 0) {
-		// Pop h and l
-		h = stack[top--];
-		l = stack[top--];
-
-		// Set pivot element at its correct position
-		// in sorted array
-		int32_t p = partition(control_OS.listaTareas, l, h);
-
-		// If there are elements on left side of pivot,
-		// then push left side to stack
-		if (p - 1 > l) {
-			stack[++top] = l;
-			stack[++top] = p - 1;
-		}
-
-		// If there are elements on right side of pivot,
-		// then push right side to stack
-		if (p + 1 < h) {
-			stack[++top] = p + 1;
-			stack[++top] = h;
-		}
-	}
+void Os_ClearSchedulingFromIRQ()
+{
+	Os_Control.SchedulingFromIRQ = false;
 }
 
+bool Os_IsSchedulingFromIRQ()
+{
+	return(Os_Control.SchedulingFromIRQ);
+}
 
-/*************************************************************************************************
-	 *  @brief Ordena tareas de mayor a menor prioridad.
-     *
-     *  @details
-     *   Funcion de soporte para ordenarPrioridades. No debe llamarse fuera de mencionada
-     *   funcion.
-     *
-	 *  @param 	arr		Puntero a la lista de punteros de estructuras de tareas a ordenar
-	 *  @param	l		Inicio del vector a ordenar (puede ser un subvector)
-	 *  @param	h		Fin del vector a ordenar (puede ser un subvector)
-	 *  @return     	Retorna la posicion del pivot necesario para el algoritmo
-***************************************************************************************************/
-static int32_t partition(tarea** arr, int32_t l, int32_t h)  {
-	tarea* x = arr[h];
-	tarea* aux;
-	int32_t i = (l - 1);
-
-	for (int j = l; j <= h - 1; j++) {
-		if (arr[j]->priority <= x->priority) {
-			i++;
-			//swap(&arr[i], &arr[j]);
-			aux = arr[i];
-			arr[i] = arr[j];
-			arr[j] = aux;
-		}
-	}
-	//swap(&arr[i + 1], &arr[h]);
-	aux = arr[i+1];
-	arr[i+1] = arr[h];
-	arr[h] = aux;
-
-	return (i + 1);
+void Os_SetError(os_error_t err, void* caller)
+{
+	Os_Control.error = err;
+	errorHook(caller);
 }

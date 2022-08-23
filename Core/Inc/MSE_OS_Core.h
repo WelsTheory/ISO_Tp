@@ -14,13 +14,74 @@
 #include "main.h"
 
 
-
-
 /************************************************************************************
- * 			Tamaño del stack predefinido para cada tarea expresado en bytes
+ *
  ***********************************************************************************/
 
 #define STACK_SIZE 256
+#define Os_IdleTask_ID 0xFF
+
+// PRIORIDADES
+#define MAX_PRIORITY			0
+#define MIN_PRIORITY			3
+
+#define COUNT_PRIORITY			(MIN_PRIORITY-MAX_PRIORITY)+1
+
+#define OS_MAX_PRIORITY			4
+
+#define TASK_NAME_SIZE			10
+
+
+#define QUEUE_HEAP_SIZE			64
+
+/*==================[definicion de datos para el OS]=================================*/
+
+typedef enum
+{
+	Task_Ready,
+	Task_Running,
+	Task_Blocked,
+	Task_Suspended
+}task_state_t;
+
+/*==================[definicion de estados posibles del OS]=================================*/
+
+typedef enum
+{
+	Os_From_Reset,
+	Os_Normal_Run,
+	Os_Scheduling,
+	Os_Error,
+	Os_Running_from_IRQ
+}os_state_t;
+
+typedef enum
+{
+	Os_error_none,
+	Os_error_exceeded,
+	Os_error_notask,
+	Os_error_invalid_state,
+	Os_error_maxpriority_exceeded,
+	Os_error_daly_from_IRQ
+}os_error_t;
+
+/*==================[definicion de estructura para cada tarea]=================================*/
+
+typedef struct
+{
+	uint32_t stack[STACK_SIZE/4];
+	uint32_t stackPointer;
+	void *entryPoint;
+	uint8_t id;
+	task_state_t state;
+	uint8_t priority;
+	uint8_t taskID;
+	uint32_t blockedTicks;
+}task_handler_t;
+
+extern uint32_t tarea1;
+extern uint32_t tarea2;
+extern uint32_t tarea3;
 
 /************************************************************************************
  * 	Posiciones dentro del stack frame de los registros que conforman el stack frame
@@ -57,102 +118,31 @@
 #define STACK_FRAME_SIZE		8
 #define FULL_STACKING_SIZE 		17	//16 core registers + valor previo de LR
 
-#define Os_IdleTask_ID 0xFF
-
-#define TASK_NAME_SIZE			10
-#define TASK_MAX_ALLOWED		8
-
-// PRIORIDADES
-#define MAX_PRIORITY			0
-#define MIN_PRIORITY			3
-
-#define COUNT_PRIORITY			(MIN_PRIORITY-MAX_PRIORITY)+1
-
-#define QUEUE_HEAP_SIZE			64
 /*==================[definicion codigos de error de OS]=================================*/
-
-#define OS_ERROR_TAREAS			-1
-#define OS_ERROR_SCHEDULING		-2
-
-/*==================[definicion de datos para el OS]=================================*/
-
-enum task_state_t
-{
-	Task_Ready,
-	Task_Running,
-	Task_Blocked//,
-	//Task_Suspended
-
-} ;
-
-typedef enum task_state_t estadoTarea;
-
-/*==================[definicion de estados posibles del OS]=================================*/
-
-enum os_state_t
-{
-	Os_From_Reset,
-	Os_Normal_Run,
-	Os_Scheduling
-};
-
-typedef enum os_state_t estadoOS;
-
-enum os_error_t
-{
-	Os_error_none,
-	Os_error_exceeded,
-	Os_error_notask,
-	Os_error_invalid_state
-};
-
-typedef enum os_error_t errorOS;
-
-/*==================[definicion de estructura para cada tarea]=================================*/
-
-struct task_handler_t
-{
-	uint32_t stack[STACK_SIZE/4];
-	uint32_t stackPointer;
-	void *entryPoint;
-	uint8_t id;
-	estadoTarea state;
-	uint8_t priority;
-	uint8_t taskID;
-	uint32_t blockedTicks;
-};
-
-typedef struct task_handler_t tarea;
-//typedef struct task_handler_t tareaIdle;
-//task_handler_t os_idleTask;
-
-/*==================[definicion de estructura para el SO]=================================*/
-
-struct os_control_t
-{
-	void *listaTareas[TASK_MAX_ALLOWED];
-	int32_t error;
-	uint8_t cantidad_Tareas;
-	uint8_t cantTareas_prioridad[COUNT_PRIORITY];
-
-	estadoOS estado_sistema;
-	bool cambioContextoNecesario;
-
-	tarea * actualTask;
-	tarea * nextTask;
-};
-
-typedef struct os_control_t os_control;
 
 
 
 /*==================[definicion de prototipos]=================================*/
 
-void OS_InitTask(void *entryPoint, tarea *task, uint8_t prioridad );
+void OS_InitTask(task_handler_t *tareaHandler, void* entryPoint, uint8_t prioridad );
 void OS_Init(void);
 int32_t os_getError(void);
-tarea* os_getTareaActual(void);
+task_handler_t* Os_GetTareaActual(void);
 void os_CPU_YIELD(void);
 
+void Os_Critical_Enter();
+void Os_Critical_Exit();
+
+os_state_t Os_GetControlState();
+
+void Os_SetControlState(task_state_t newState);
+
+void Os_SetSchedulingFromIRQ();
+
+void Os_ClearSchedulingFromIRQ();
+
+bool Os_IsSchedulingFromIRQ();
+
+void Os_SetError(os_error_t err, void* caller);
 
 #endif /* INC_MSE_OS_CORE_H_ */

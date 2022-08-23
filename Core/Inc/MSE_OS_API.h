@@ -10,37 +10,40 @@
 
 #include "MSE_OS_Core.h"
 
+#define OS_COLA_HEAP_SIZE		256
+#define OS_COLA_DEFAULT_VALUE 0xFF
+
 /********************************************************************************
  * Definicion de la estructura para los semaforos
  *******************************************************************************/
-struct _semaforo  {
-	tarea* tarea_asociada;
+typedef struct   {
+	task_handler_t* tarea_asociada;
 	bool tomado;
-};
-
-typedef struct _semaforo osSemaforo;
+}os_semaforo_t;
 
 /********************************************************************************
  * Definicion de la estructura para las colas
  *******************************************************************************/
-struct _cola  {
-	uint8_t data[QUEUE_HEAP_SIZE];
-	tarea* tarea_asociada;
-	uint16_t indice_head;
-	uint16_t indice_tail;
-	uint16_t size_elemento;
-};
+typedef struct {
+	uint16_t head;
+	uint16_t tail;
+	uint16_t size_cola;
+	uint16_t element_max;
+	uint16_t element_size;
+	uint8_t data[OS_COLA_HEAP_SIZE];
+	task_handler_t* tareaesperando;
+}os_cola_t;
 
-typedef struct _cola osCola;
+
 
 void os_Delay(uint32_t ticks);
 
-void os_SemaforoInit(osSemaforo* sem);
-void os_SemaforoTake(osSemaforo* sem);
-void os_SemaforoGive(osSemaforo* sem);
+void Os_Sem_Init(os_semaforo_t* sem);
+void Os_Sem_Take(os_semaforo_t* sem);
+void Os_Sem_Give(os_semaforo_t* sem);
 
-void os_ColaInit(osCola* cola, uint16_t datasize);
-void os_ColaWrite(osCola* cola, void* dato);
-void os_ColaRead(osCola* cola, void* dato);
+void Os_Cola_Init(os_cola_t* cola, uint16_t datasize);
+void Os_Cola_Write(os_cola_t* cola, void* data);
+void Os_Cola_Read(os_cola_t* cola, void* data);
 
 #endif /* INC_MSE_OS_API_H_ */

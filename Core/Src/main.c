@@ -17,19 +17,19 @@
 
 /*==================[Global data declaration]==============================*/
 
-tarea Tarea1;	//prioridad 0
-tarea Botones;	//prioridad 3
+task_handler_t Tarea1,Tarea2, Botones;	//prioridad 3
 
-osSemaforo colaTarea1;
+os_semaforo_t semLed1,semLed2,semLed3;
+
+os_cola_t cola1,cola2;
 
 /*================= DATOS A ENVIAR EN COLA =================================*/
-struct _mydata  {
-	float var_float;
-	int32_t var_int;
-	char name[3];
-};
-
-typedef struct _mydata my_data;
+typedef struct
+{
+	float	floatData;
+	int16_t intData;
+	char message[8];
+} cola_enviar_t;
 
 /*==================[internal functions declaration]=========================*/
 
@@ -49,54 +49,94 @@ static void initHardware(void)  {
 }
 
 /*==================[Definicion de tareas para el OS]==========================*/
-void tarea1(void)  {
-	my_data datos;
-
+/*==================[Definicion de tareas para el OS]==========================*/
+void tarea_tarea1(void)
+{
+	int i = 0;
+	cola_enviar_t queueData;
+	queueData.floatData = 3.1421;
+	queueData.intData = -128;
+	strcpy(queueData.message, "hola");
+	write_LED1(LOW);
 	while (1) {
-
-		os_ColaRead(&colaTarea1,&datos);
-		write_LED1(true);
-		os_Delay(1000);
-		write_LED1(false);
-		memset(&datos,0x00,sizeof(my_data));
-
+		if (i%10 == 0)
+		{
+			Os_Cola_Write(&cola1, &queueData);
+			Os_Sem_Take(&semLed1);
+		}
+		toggle_LED1();
+		os_Delay(200);
+		i++;
 	}
 }
 
-void botones(void)  {
-	my_data datos_enviar;
-	while(1)  {
-		if(read_BUTTON() == HIGH)
+void tarea_tarea2(void)
+{
+	int k = 0;
+	write_LED2(LOW);
+	cola_enviar_t queueData;
+	while (1) {
+		if (k%10 == 0)
 		{
-			datos_enviar.var_float = 2.5;
-			datos_enviar.var_int = -5;
-			datos_enviar.name[0] = 'I';
-			datos_enviar.name[1] = 'S';
-			datos_enviar.name[2] = 'O';
-			os_ColaWrite(&colaTarea1,&datos_enviar);
+			Os_Cola_Read(&cola1, &queueData);
 		}
+		write_LED2(HIGH);
+		os_Delay(500);
+		write_LED2(LOW);
+		os_Delay(500);
+		k++;
+	}
+}
 
+void tarea_botones(void)
+{
+	cola_enviar_t queueData;
+	queueData.floatData = 189.1421;
+	queueData.intData = -87;
+	strcpy(queueData.message, "test2");
+	while(1)  {
+		if(read_BUTTON())
+			Os_Sem_Give(&semLed1);
 		os_Delay(100);
 	}
 }
-
 
 int main(void)
 {
 	initHardware();
 
-	OS_InitTask(tarea1, &Tarea1, PRIORIDAD_0);
-	OS_InitTask(botones, &Botones, PRIORIDAD_3);
+	Os_Sem_Init(&semLed1);
+	Os_Sem_Init(&semLed2);
+	Os_Sem_Init(&semLed3);
 
-	os_ColaInit(&colaTarea1,sizeof(my_data));
+	Os_Cola_Init(&cola1, sizeof(cola_enviar_t));
+	Os_Cola_Init(&cola2, sizeof(cola_enviar_t));
+
+	OS_InitTask(&Tarea1, tarea_tarea1, 1);
+	OS_InitTask(&Tarea2, tarea_tarea2, 0);
+	OS_InitTask(&Botones, tarea_botones, 3);
 
 	OS_Init();
 
 	while(1)
 	{
+		__WFI();
 	}
 	return 0;
 }
 
+static uint32_t global_tickCounter = 0;
+void tickHook(void)
+{
+	global_tickCounter++;
+}
 
+static uint32_t globla_idleTaskCounter = 0;
+void taskIdleHook()
+{
+	while(1)
+	{
+		globla_idleTaskCounter++;
+	}
+}
 
