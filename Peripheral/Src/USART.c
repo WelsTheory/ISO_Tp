@@ -74,6 +74,16 @@ char USART_Rx(void)
 	return (USART3->DR & 0xFF);
 }
 
+void USART_Cadena(char *dat, uint32_t len){
+	uint32_t i = 0;
+	while(i < len){
+//	while(*dat != NULL){
+		USART_Tx(*dat);// 'H' 'o' l a
+		dat++;// 1 2 3 4
+		i++;
+	}
+}
+
 // 1- DONDE ALMACENAS
 // 2  CUANTA INFORMACIÓN
 // 3  TIMEOUT

@@ -26,6 +26,8 @@ char USART_Rx(void);
 
 void USART_Tx(char data);
 
+void USART_Cadena(char *dat, uint32_t len);
+
 /**/
 void USART_Tx_Int(void);
 

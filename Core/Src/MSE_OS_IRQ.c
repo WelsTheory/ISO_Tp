@@ -68,6 +68,7 @@ void RCC_IRQHandler(void)
 void EXTI0_IRQHandler(void)
 {
 	Os_IRQHandler(EXTI0_IRQn);
+	EXTI->PR |= (EXTI_PR_PR0);
 }
 
 void EXTI1_IRQHandler(void)
@@ -233,6 +234,7 @@ void USART3_IRQHandler(void)
 void EXTI15_10_IRQHandler(void)
 {
 	Os_IRQHandler(EXTI15_10_IRQn);
+	EXTI->PR |= (EXTI_PR_PR13);
 }
 
 void RTC_Alarm_IRQHandler(void)
